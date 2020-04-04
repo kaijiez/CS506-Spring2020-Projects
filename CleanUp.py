@@ -4,6 +4,7 @@ import os
 import re
 from operator import itemgetter
 import pandas as pd
+import numpy as np
 
 #read data in batches,
 def readfile(filename):
@@ -11,52 +12,51 @@ def readfile(filename):
     streets = []
     ownerNames=[]
 
-    df = pd.read_csv(os.path.join("data/",filename),encoding = "ISO-8859-1")
+    df = pd.read_csv(os.path.join("data/",filename))
 
     x = pd.DataFrame(df.owner_addr)
     y = pd.DataFrame(df.owner_name)
     z = pd.DataFrame(df.owner_city)
     q = pd.DataFrame(df.owner_stat)
     result = pd.concat([x,z,q,y], axis=1, join='inner')
-    result = result.values[:1000].tolist()
+    result = result.values.tolist()
     for row in result:
         streets.append(str(row[0])+" "+str(row[1])+" "+str(row[2]))
         ownerNames.append(str(row[3]))
 
-    print(list(zip(streets, ownerNames)))
-    return list(zip(streets, ownerNames))
+    # print(list(zip(streets, ownerNames)))
+    df["FullOwnerAddress"] = pd.DataFrame(streets)
+    df["FullOwnerAddress"].fillna("",inplace=True)
+    df["owner_name"] = pd.DataFrame(ownerNames)
+    df["owner_name"].fillna("",inplace=True)
+    print(df["FullOwnerAddress"].head)
+    print(df.shape)
+    return df
 
 def matchAgencyNames(filename,data):
+    # print(data.columns.values)
     df = pd.read_csv(os.path.join("data/",filename),encoding = "ISO-8859-1")
     agency = pd.DataFrame(df.Agency)
     address = pd.DataFrame(df.Address)
     result = pd.concat([agency,address],axis=1,join='inner')
     result = result.values.tolist()
-    res={"Name":[],"Address":[]}
+    # res={"Name":[],"Address":[]}
 
     choice=agency.values.tolist()
-    for tuple in range(len(data)):
-        ls=[(fuzz.ratio(data[tuple][1], x), x) for x in choice] #ls=[(score,name)]
 
-        #use Name from Agency list if socre >50, else keep original Name
-        if (max(ls, key=itemgetter(0))[0]>50):
-            print("found one")
-            res["Name"].append(max(ls, key=itemgetter(0))[1][0])
-            res["Address"].append(data[tuple][0])
-        else:
-            res["Name"].append(data[tuple][1])
-            res["Address"].append(data[tuple][0])
+    #match names with agencynames if score>50 otherwise keep original names
+    data['owner_name'].apply(lambda x: max([(fuzz.ratio(x,i),x) for i in choice],key=itemgetter(0))[1][0] if max([(fuzz.ratio(x,i),x) for i in choice],key=itemgetter(0))[0]>50 else x )
 
     print("printing")
-    df_r = pd.DataFrame(res,columns=["Name","Address"])
-    df_r.to_csv("./result/CleanONResult.csv")
+    data.to_csv("./result/MatchWithAgencyNames.csv", index=False)
 
     #very long runtime, need optimization
-    return res
+    return data
 
 
 
-def compareOwnerNames(tuples):
+def compareOwnerNames(data):
+    tuples = pd.concat([data["FullOwnerAddress"],data["owner_name"]],axis=1).values.tolist()
     curr=""
     # choice=[tuples[0][1]]
     backtrack=0
@@ -95,67 +95,72 @@ def compareOwnerNames(tuples):
             backtrack=tup
             choice=[]
 
+    print("comparing owner names")
+    # print(data["FullOwnerAddress"].head())
+    # print(data["objectid"].head())
+    df = pd.DataFrame(tuples,columns=['FullOwnerAddress',"owner_name"])
+    df.reset_index(drop=True, inplace=True)
+    data.reset_index(drop=True, inplace=True)
+    df = pd.concat([df, data["objectid"]],axis=1)
+    # print(df["FullOwnerAddress"].head())
+    # print("data",data["objectid"].head())
+    # print("df", df['objectid'].head())
+    result = data.merge(df, left_on="objectid", right_on="objectid")
+    # print(result["FullOwnerAddress"].head())
+    # print(result["objectid"].head())
+    print("df",df.shape)
+    print("data",data.shape)
+    return data
 
-    return tuples
 
 
+def sort_streets(data):
 
-def sort_streets(street_list):
-    """
-    Sort streets alphabetically, ignoring cardinal direction prefixes such as North, South, East and West
-    :param street_list: list of street names
-    """
-    # compile a sorted list to extract the direction prefixes and street root from the street string
-    # created using https://regex101.com/#python
+    data["FullOwnerAddress"] = data["FullOwnerAddress"].apply(lambda x: cleanupStreet(x))
+    data.sort_values(by=['FullOwnerAddress'],inplace=True)
+    print(data.shape)
+    return data
+
+def cleanupStreet(street):
     regex = re.compile(
         r'(?P<prefix>^North\w*\s|^South\w*\s|^East\w*\s|^West\w*\s|^N\.?\s|^S\.?\s|^E\.?\s|^W\.?\s)?(?P<street>.*)',
         re.IGNORECASE
     )
-
-    # list to store tuples for sorting
-    street_sort_list = []
-
-    # for every street
-    counter=0
-    for street in street_list:
-        street_prefix=""
-        # just in case, strip leading and trailing whitespace
-        street = street[0].strip()
-
-        # extract the prefix and street using regular expression matching
-        street_match = regex.search(street)
-
-        # convert both the returned strings to lowercase
-        if street_match.group('prefix'):
+    street_prefix=""
+    street = street.strip()
+    street_match = regex.search(street)
+    if street_match.group('prefix'):
             street_prefix = street_match.group('prefix')
 
-        street_root = street_match.group('street')
-
-        # place the prefix, street extract and full street string in a tuple and add it to the list
-        street_sort_list.append(((street_prefix, street_root, street),list(map(itemgetter(1),street_list))[counter]))
-        counter+=1
-
-    # sort the streets first on street name, and second with the prefix to address duplicates
-    street_sort_list.sort(key=extractStreetTuple, reverse=False)
-
-    # return just a list of sorted streets, using a list comprehension to pull out the original street name in order
-
-    return [(street_tuple[0][2],street_tuple[1]) for street_tuple in street_sort_list]
+    street_root = street_match.group('street')
+    return street_prefix +street_root
 
 def extractStreetTuple(street):
     return (street[0][1],street[0][0])
 
+def mergeFile(filename):
+    dataset1=pd.read_csv(os.path.join("data/",filename))
+    dataset2=pd.read_csv("./result/MatchWithAgencyNames.csv")
+    print(dataset1.objectid.head())
+    dataset1.objectid=dataset1.objectid.astype(np.int64)
+    # dataset2=dataset2.astype(object)
+    # print("dataset1",dataset1.dtypes)
+    result=dataset1.merge(dataset2,left_on="objectid",right_on="objectid")
+    print(result.head())
+
 
 def main():
-    data=readfile("original_luc_gt_909.csv")
-    print("finished reading data")
+    # data=readfile("original_luc_gt_909.csv")
+    # print("finished reading data")
 
-    streets=sort_streets(data)
-    print("finished sorted street")
+    # streets=sort_streets(data)
+    # print("finished sorted street")
 
-    data=compareOwnerNames(streets)
-    print("finished comparing owner names")
+    # data=compareOwnerNames(streets)
+    # print("finished comparing owner names")
 
-    matchAgencyNames("MassGovernmentAgencyList.csv",data)
+    # matchAgencyNames("MassGovernmentAgencyList.csv",data)
+
+    mergeFile("std_name.csv")
 
 main()
