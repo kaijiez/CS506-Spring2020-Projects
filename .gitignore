@@ -110,3 +110,5 @@ venv.bak/
 data/original.csv
 cleanON/*
 .DS_Store	
+
+config/

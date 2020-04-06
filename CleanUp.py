@@ -33,24 +33,49 @@ def readfile(filename):
     print(df.shape)
     return df
 
+def matchOnName(x,agencylist):
+    # agencylist -> [(name,address)]
+    highestscorematch= max([(fuzz.ratio(x,i),i) for (i,j) in agencylist],key=itemgetter(0))
+    # print(highestscorematch)
+    if highestscorematch[0]>50:
+        matchflag.append(1)
+        return highestscorematch[1]
+    else:
+        matchflag.append(0)
+        return x
+
+def matchOnAddress(x,agencylist,matchflag):
+    # x is a row from the dataframe
+    # print(x.head)
+    address= x['FullOwnerAddress']
+    originalName = x["std_name"]
+    highestscorematch= max([(fuzz.ratio(address,j),i) for (i,j) in agencylist],key=itemgetter(0))
+    if highestscorematch[0]>50:
+        # print("address",address)
+        print("find a match, name: ",highestscorematch[1])
+        matchflag.append(1)
+        return highestscorematch[1]
+    else:
+        matchflag.append(0)
+        return originalName
+
 def matchAgencyNames(filename,data):
     # print(data.columns.values)
     df = pd.read_csv(os.path.join("data/",filename),encoding = "ISO-8859-1")
     agency = pd.DataFrame(df.Agency)
     address = pd.DataFrame(df.Address)
-    result = pd.concat([agency,address],axis=1,join='inner')
-    result = result.values.tolist()
-    # res={"Name":[],"Address":[]}
-
-    choice=agency.values.tolist()
-
+    choice = pd.concat([agency,address],axis=1,join='inner')
+    choice = choice.values.tolist()
+    matchflag=[]
     #match names with agencynames if score>50 otherwise keep original names
-    data['owner_name'].apply(lambda x: max([(fuzz.ratio(x,i),x) for i in choice],key=itemgetter(0))[1][0] if max([(fuzz.ratio(x,i),x) for i in choice],key=itemgetter(0))[0]>50 else x )
+    # data['std_name']=data['std_name'].apply(lambda x: matchOnName(x,choice))
+    data['std_name'] = data.apply(lambda x: matchOnAddress(x,choice,matchflag),axis=1)
+    data['matchAgencyList']=pd.DataFrame(matchflag)
 
-    print("printing")
+    # print(data['matchAgencyList'])
+    print("Done")
     data.to_csv("./result/MatchWithAgencyNames.csv", index=False)
 
-    #very long runtime, need optimization
     return data
 
 
@@ -58,13 +83,10 @@ def matchAgencyNames(filename,data):
 def compareOwnerNames(data):
     tuples = pd.concat([data["FullOwnerAddress"],data["owner_name"]],axis=1).values.tolist()
     curr=""
-    # choice=[tuples[0][1]]
-    backtrack=0
+    backtrack=0    #keep track of index of the starting row to calculate score for name standardization
     prevaddr=tuples[0][0]
     for tup in range(1,len(tuples)):
-        # build up choice list
-        # if(tuples[tup][0]==prevaddr):
-        #     choice.append(tuples[tup][1])
+
         if(tuples[tup][0]!=prevaddr or tup==(len(tuples)-1)):
             # find owner name with highest score
             scores={}
@@ -76,11 +98,6 @@ def compareOwnerNames(data):
                     for score,name in similarity:
                         scores[name]+=score
 
-                    #add all scores for all names in "score" for fairness
-                    # if(process.extractOne(tuples[i][1],choice)!=None):
-                    #     scores[tuples[i][1]]+=process.extractOne(tuples[i][1],choice)[1]
-
-                    # [(fuzz.ratio(tuples[i][1],x),x) for x in choice]
 
             standardizeName=max(scores, key=scores.get)
             # print("standardize name",scores.keys())
@@ -93,24 +110,23 @@ def compareOwnerNames(data):
             #reset variables
             prevaddr=tuples[tup][0]
             backtrack=tup
-            choice=[]
 
     print("comparing owner names")
     # print(data["FullOwnerAddress"].head())
     # print(data["objectid"].head())
-    df = pd.DataFrame(tuples,columns=['FullOwnerAddress',"owner_name"])
+    df = pd.DataFrame(tuples,columns=['FullOwnerAddress',"std_name"])
     df.reset_index(drop=True, inplace=True)
     data.reset_index(drop=True, inplace=True)
     df = pd.concat([df, data["objectid"]],axis=1)
     # print(df["FullOwnerAddress"].head())
     # print("data",data["objectid"].head())
     # print("df", df['objectid'].head())
-    result = data.merge(df, left_on="objectid", right_on="objectid")
-    # print(result["FullOwnerAddress"].head())
-    # print(result["objectid"].head())
+    result = data.merge(df, on=["objectid","FullOwnerAddress"])
     print("df",df.shape)
     print("data",data.shape)
-    return data
+    print("result",result.columns.values)
+    print("result",result.shape)
+    return result
 
 
 
@@ -138,29 +154,30 @@ def cleanupStreet(street):
 def extractStreetTuple(street):
     return (street[0][1],street[0][0])
 
-def mergeFile(filename):
-    dataset1=pd.read_csv(os.path.join("data/",filename))
-    dataset2=pd.read_csv("./result/MatchWithAgencyNames.csv")
-    print(dataset1.objectid.head())
-    dataset1.objectid=dataset1.objectid.astype(np.int64)
+def mergeFile(dataset1,dataset2):
+
+    # print(dataset1.objectid.head())
+    # dataset1.objectid=dataset1.objectid.astype(np.int64)
     # dataset2=dataset2.astype(object)
     # print("dataset1",dataset1.dtypes)
-    result=dataset1.merge(dataset2,left_on="objectid",right_on="objectid")
-    print(result.head())
+    result=dataset1.merge(dataset2,left_on="std_name",right_on="Agency")
+    print(result.shape)
 
 
 def main():
-    # data=readfile("original_luc_gt_909.csv")
-    # print("finished reading data")
+    data=readfile("original_luc_gt_909.csv")
+    print("finished reading data")
 
-    # streets=sort_streets(data)
-    # print("finished sorted street")
+    streets=sort_streets(data)
+    print("finished sorted street")
 
-    # data=compareOwnerNames(streets)
-    # print("finished comparing owner names")
+    data=compareOwnerNames(streets)
+    print("finished comparing owner names")
 
-    # matchAgencyNames("MassGovernmentAgencyList.csv",data)
+    matchAgencyNames("MassGovernmentAgencyList.csv",data)
 
-    mergeFile("std_name.csv")
+    # dataset1=pd.read_csv("./result/MatchWithAgencyNames.csv")
+    # dataset2=pd.read_csv("./data/MassGovernmentAgencyList.csv",encoding = "ISO-8859-1")
+    # mergeFile(dataset1,dataset2)
 
 main()
