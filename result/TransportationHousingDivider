@@ -10,10 +10,10 @@ for i in range(len(agencynames['std_name'])):
     else: # Housing
         new_column.append(0)
 
-agencynames = agencynames.drop(columns = ['std_name'])
-agencynames['std_name'] = new_column
-housing = agencynames[agencynames.std_name == 0]
-transportation = agencynames[agencynames.std_name == 1]
+# agencynames = agencynames.drop(columns = ['std_name'])
+agencynames['std_binary'] = new_column
+housing = agencynames[agencynames.std_binary == 0]
+transportation = agencynames[agencynames.std_binary == 1]
 
 
 housing.to_csv("housing.csv")
