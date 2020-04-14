@@ -74,7 +74,8 @@ def matchAgencyNames(filename,data):
 
     # print(data['matchAgencyList'])
     print("Done")
-    data.to_csv("./result/MatchWithAgencyNames.csv", index=False)
+    print(sum(matchflag))
+    data.to_csv("./result/MatchWithAgencyAddresses.csv", index=False)
 
     return data
 
@@ -138,6 +139,7 @@ def sort_streets(data):
     return data
 
 def cleanupStreet(street):
+
     regex = re.compile(
         r'(?P<prefix>^North\w*\s|^South\w*\s|^East\w*\s|^West\w*\s|^N\.?\s|^S\.?\s|^E\.?\s|^W\.?\s)?(?P<street>.*)',
         re.IGNORECASE
@@ -150,7 +152,7 @@ def cleanupStreet(street):
 
     street_root = street_match.group('street')
     return street_prefix +street_root
-
+    
 def extractStreetTuple(street):
     return (street[0][1],street[0][0])
 
